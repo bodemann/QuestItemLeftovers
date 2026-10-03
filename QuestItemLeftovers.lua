@@ -1,13 +1,11 @@
-local ADDON_NAME = ...
-
 local QIG = CreateFrame("Frame")
 local DB
 local requirements = {}
 local activeQuests = {}
 local itemQuestIndex = {}
-local itemQuestIndexBuilt = false
 local bagQuestItems = {}
 local bagQuestItemNames = {}
+local bagQuestStarts = {}
 local updateQueued = false
 
 -- QuestieDB numeric fields default to 0 when no value is stored.
@@ -73,6 +71,38 @@ local function normalizeMatchText(text)
     return text
 end
 
+local function normalizedCount(count)
+    if type(count) ~= "number" or count < 1 then return 1 end
+    return count
+end
+
+local function objectiveNameCandidate(text)
+    local s = normalizeMatchText(text)
+    if s == "" then return "" end
+
+    -- If the objective text is a hyperlink, use its bracketed display name.
+    local bracketed = string.match(s, "%[([^%]]+)%]")
+    if bracketed then
+        s = normalizeMatchText(bracketed)
+    end
+
+    -- Strip a trailing progress suffix such as "3/10", "0/10", or "10/10",
+    -- optionally preceded by a colon or whitespace.
+    s = string.gsub(s, "%s*%d+%s*/%s*%d+%s*$", "")
+    s = string.gsub(s, "%s*[:：]%s*$", "")
+
+    -- Strip common collection verbs from the beginning.
+    s = string.gsub(s, "^collect%s+", "")
+    s = string.gsub(s, "^gather%s+", "")
+    s = string.gsub(s, "^obtain%s+", "")
+    s = string.gsub(s, "^bring%s+", "")
+    s = string.gsub(s, "^recover%s+", "")
+    s = string.gsub(s, "^deliver%s+", "")
+    s = string.gsub(s, "^salvage%s+", "")
+
+    return string.gsub(string.gsub(s, "^%s+", ""), "%s+$", "")
+end
+
 local function isQuestCompleted(questID)
     questID = validID(questID)
     if not questID then return false end
@@ -128,7 +158,6 @@ end
 
 local function buildItemQuestIndex()
     wipe(itemQuestIndex)
-    itemQuestIndexBuilt = false
 
     if not DB or not DB.Quest or type(DB.Quest.GetAllIds) ~= "function" then
         return
@@ -158,7 +187,6 @@ local function buildItemQuestIndex()
         end
     end
 
-    itemQuestIndexBuilt = true
 end
 
 local function collectRelatedQuestIDs(itemID)
@@ -174,6 +202,8 @@ local function collectRelatedQuestIDs(itemID)
     local indexed = itemQuestIndex[itemID]
     for _, use in ipairs(indexed or {}) do add(use.questID) end
 
+    for qid in pairs(bagQuestStarts[itemID] or {}) do add(qid) end
+
     if DB and DB.Item then
         local related = DB.Item.relatedQuests and DB.Item.relatedQuests(itemID)
         for _, qid in ipairs(related or {}) do add(qid) end
@@ -186,7 +216,7 @@ local function collectRelatedQuestIDs(itemID)
 end
 
 local function objectiveKind(kind)
-    return kind == "objective" or kind == "objectiveLive"
+    return kind == "objective"
 end
 
 local function parseItemIDFromLink(link)
@@ -197,6 +227,7 @@ end
 local function rebuildBagQuestItemCache()
     wipe(bagQuestItems)
     wipe(bagQuestItemNames)
+    wipe(bagQuestStarts)
     if not C_Container or not C_Container.GetContainerNumSlots then return end
 
     local bagMax = _G.NUM_BAG_SLOTS or 4
@@ -213,21 +244,12 @@ local function rebuildBagQuestItemCache()
                 end
                 local starts = qinfo and validID(qinfo.questID)
                 if starts then
-                    local bucket = itemQuestIndex[itemID]
-                    if not bucket then
-                        bucket = {}
-                        itemQuestIndex[itemID] = bucket
+                    local startsBucket = bagQuestStarts[itemID]
+                    if not startsBucket then
+                        startsBucket = {}
+                        bagQuestStarts[itemID] = startsBucket
                     end
-                    local found = false
-                    for _, use in ipairs(bucket) do
-                        if use.questID == starts and use.kind == "starts" then
-                            found = true
-                            break
-                        end
-                    end
-                    if not found then
-                        bucket[#bucket + 1] = { questID = starts, kind = "starts", count = 1 }
-                    end
+                    startsBucket[starts] = true
                 end
             end
         end
@@ -238,42 +260,21 @@ local function addRequirement(itemID, count, questID, title, kind)
     itemID = validID(itemID)
     questID = validID(questID)
     if not itemID or not questID then return end
-    if type(count) ~= "number" or count < 1 then count = 1 end
 
     local entry = requirements[itemID]
     if not entry then
-        entry = { required = 0, quests = {}, support = false }
+        entry = { required = 0, quests = {} }
         requirements[itemID] = entry
     end
 
-    -- A quest can be found both in QuestieDB and in Blizzard's live quest-log
-    -- item list. Treat those as the same requirement instead of counting twice.
-    for _, q in ipairs(entry.quests) do
-        if q.id == questID then
-            if objectiveKind(q.kind) and objectiveKind(kind) then
-                if count > (q.count or 0) then
-                    entry.required = entry.required - (q.count or 0) + count
-                    q.count = count
-                end
-                if kind == "objectiveLive" then q.kind = kind end
-                return
-            elseif q.kind == kind then
-                if count > (q.count or 0) then q.count = count end
-                return
-            end
-        end
-    end
-
     if objectiveKind(kind) then
-        entry.required = entry.required + count
-    else
-        entry.support = true
+        entry.required = entry.required + normalizedCount(count)
     end
 
     entry.quests[#entry.quests + 1] = {
         id = questID,
         name = title,
-        count = count,
+        count = normalizedCount(count),
         kind = kind,
     }
 end
@@ -297,68 +298,88 @@ local function rebuildQuestCache()
         if info and not info.isHeader and info.questID then
             local questID = validID(info.questID)
             if questID then
-            activeQuests[questID] = true
-            local title = questName(questID, info.title)
+                activeQuests[questID] = true
+                local title = questName(questID, info.title)
 
-            local objectives = DB.Quest.objectives(questID)
-            local itemObjectives = objectives and objectives[3]
-            if itemObjectives then
-                for _, objective in ipairs(itemObjectives) do
-                    -- QuestieDBItemObjective = { itemID, optional text, requiredCount }
-                    addRequirement(objective[1], objective[3], questID, title, "objective")
+                -- Aggregate QuestieDB item objectives per item so that two separate
+                -- objectives for the same item in one quest are summed correctly.
+                local dbCounts = {}
+                local objectives = DB.Quest.objectives and DB.Quest.objectives(questID)
+                local itemObjectives = objectives and objectives[3]
+                if itemObjectives then
+                    for _, objective in ipairs(itemObjectives) do
+                        local oItemID = validID(objective[1])
+                        if oItemID then
+                            dbCounts[oItemID] = (dbCounts[oItemID] or 0) + normalizedCount(objective[3])
+                        end
+                    end
                 end
-            end
 
-            -- Forever has quests that are not present in QuestieDB yet. For quests
-            -- currently in the player's log, ask Blizzard for each required item link.
-            -- The required-item index counts only item objectives, not all objectives.
-            if C_QuestLog.GetQuestObjectives and GetQuestLogItemLink then
-                local liveObjectives = safeCall(C_QuestLog.GetQuestObjectives, questID)
-                local requiredIndex = 0
-                for _, objective in ipairs(liveObjectives or {}) do
-                    if objective.type == "item" then
-                        requiredIndex = requiredIndex + 1
-                        local link = safeCall(GetQuestLogItemLink, "required", requiredIndex, questID)
-                        local liveItemID = parseItemIDFromLink(link)
-                        if liveItemID then
-                            addRequirement(liveItemID, objective.numRequired or 1, questID, title, "objectiveLive")
-                        else
-                            -- Forever can expose the live objective while
-                            -- GetQuestLogItemLink still returns nil (for example
-                            -- uncached/new quest items). Fall back to matching the
-                            -- objective text against quest-item names actually in
-                            -- the player's bags. This is intentionally only used
-                            -- for active item objectives.
-                            local objectiveText = normalizeMatchText(objective.text)
-                            if objectiveText ~= "" then
-                                for bagItemID in pairs(bagQuestItems) do
-                                    local bagName = bagQuestItemNames[bagItemID]
-                                    local normalizedName = normalizeMatchText(bagName)
-                                    if normalizedName ~= "" and string.find(objectiveText, normalizedName, 1, true) then
-                                        addRequirement(bagItemID, objective.numRequired or 1, questID, title, "objectiveLive")
+                -- Forever has quests that are not present in QuestieDB yet. For quests
+                -- currently in the player's log, ask Blizzard for each required item link.
+                -- The required-item index counts only item objectives, not all objectives.
+                local liveCounts = {}
+                if C_QuestLog.GetQuestObjectives and GetQuestLogItemLink then
+                    local liveObjectives = safeCall(C_QuestLog.GetQuestObjectives, questID)
+                    local requiredIndex = 0
+                    for _, objective in ipairs(liveObjectives or {}) do
+                        if objective.type == "item" then
+                            requiredIndex = requiredIndex + 1
+                            local numRequired = normalizedCount(objective.numRequired)
+                            local link = safeCall(GetQuestLogItemLink, "required", requiredIndex, questID)
+                            local liveItemID = parseItemIDFromLink(link)
+                            if liveItemID then
+                                liveCounts[liveItemID] = (liveCounts[liveItemID] or 0) + numRequired
+                            else
+                                -- Forever can expose the live objective while
+                                -- GetQuestLogItemLink still returns nil (for example
+                                -- uncached/new quest items). Fall back to matching the
+                                -- objective text against quest-item names actually in
+                                -- the player's bags. This is intentionally only used
+                                -- for active item objectives.
+                                local candidate = objectiveNameCandidate(objective.text)
+                                if candidate ~= "" then
+                                    for bagItemID in pairs(bagQuestItems) do
+                                        local bagName = bagQuestItemNames[bagItemID]
+                                        if normalizeMatchText(bagName) == candidate then
+                                            liveCounts[bagItemID] = (liveCounts[bagItemID] or 0) + numRequired
+                                        end
                                     end
                                 end
                             end
                         end
                     end
                 end
-            end
 
-            -- sourceItemId is an item supplied for an active quest. It is not always a
-            -- collect objective, so keep it as a conservative support-item warning.
-            local sourceItemID = DB.Quest.sourceItemId and validID(DB.Quest.sourceItemId(questID))
-            if sourceItemID then
-                addRequirement(sourceItemID, 1, questID, title, "source")
-            end
+                -- Merge the two sources. Both describe the same set of objectives,
+                -- so take the larger count rather than adding them together.
+                local merged = {}
+                for itemID, count in pairs(dbCounts) do merged[itemID] = count end
+                for itemID, count in pairs(liveCounts) do
+                    local existing = merged[itemID]
+                    if not existing or count > existing then
+                        merged[itemID] = count
+                    end
+                end
 
-            local requiredSourceItems = DB.Quest.requiredSourceItems and DB.Quest.requiredSourceItems(questID)
-            for _, itemID in ipairs(requiredSourceItems or {}) do
-                addRequirement(itemID, 1, questID, title, "requiredSource")
-            end
+                for itemID, count in pairs(merged) do
+                    addRequirement(itemID, count, questID, title, "objective")
+                end
+
+                -- sourceItemId is an item supplied for an active quest. It is not always a
+                -- collect objective, so keep it as a conservative support-item warning.
+                local sourceItemID = DB.Quest.sourceItemId and validID(DB.Quest.sourceItemId(questID))
+                if sourceItemID then
+                    addRequirement(sourceItemID, 1, questID, title, "source")
+                end
+
+                local requiredSourceItems = DB.Quest.requiredSourceItems and DB.Quest.requiredSourceItems(questID)
+                for _, itemID in ipairs(requiredSourceItems or {}) do
+                    addRequirement(itemID, 1, questID, title, "requiredSource")
+                end
             end
         end
     end
-
 end
 
 local function scheduleRebuild()
@@ -494,11 +515,10 @@ local function addQuestLines(tooltip, quests, objectiveOnly)
 end
 
 local function addTooltipStatus(tooltip, itemID)
-    if not itemID or tooltip.__qigItemID == itemID then return end
+    if not itemID then return end
     local status = itemQuestContext(itemID)
     if not status then return end
 
-    tooltip.__qigItemID = itemID
     tooltip:AddLine(" ")
 
     if status.code == "KEEP" then
@@ -547,14 +567,11 @@ local function addTooltipStatus(tooltip, itemID)
             addQuestLines(tooltip, status.related, false)
         end
     end
-
-    tooltip:Show()
 end
 
 local function hookTooltips()
     if TooltipDataProcessor and Enum and Enum.TooltipDataType and Enum.TooltipDataType.Item then
         TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tooltip, data)
-            tooltip.__qigItemID = nil
             local itemID = data and data.id
             if not itemID and data and data.hyperlink then
                 itemID = tonumber(string.match(data.hyperlink, "item:(%d+)"))
@@ -567,7 +584,6 @@ local function hookTooltips()
     -- Fallback for clients retaining the classic tooltip callback.
     if GameTooltip and GameTooltip.HookScript then
         GameTooltip:HookScript("OnTooltipSetItem", function(tooltip)
-            tooltip.__qigItemID = nil
             local _, link = tooltip:GetItem()
             local itemID = link and tonumber(string.match(link, "item:(%d+)"))
             addTooltipStatus(tooltip, itemID)
@@ -599,6 +615,11 @@ local function initialize()
 end
 
 local function scanBags()
+    if not DB or not DB.Item then
+        msg("QuestieDB is not loaded. Enable QuestieDB and reload the UI.")
+        return
+    end
+
     local seen = {}
     local bagMax = _G.NUM_BAG_SLOTS or 4
     local found = 0
@@ -607,7 +628,7 @@ local function scanBags()
         local slots = C_Container and C_Container.GetContainerNumSlots and C_Container.GetContainerNumSlots(bag) or 0
         for slot = 1, slots do
             local info = C_Container.GetContainerItemInfo(bag, slot)
-            local itemID = info and info.itemID
+            local itemID = info and validID(info.itemID)
             if itemID and not seen[itemID] then
                 seen[itemID] = true
                 local status = itemQuestContext(itemID)
