@@ -351,15 +351,13 @@ local function rebuildQuestCache()
                     end
                 end
 
-                -- Merge the two sources. Both describe the same set of objectives,
-                -- so take the larger count rather than adding them together.
+                -- Merge the two sources. Blizzard's live data is authoritative for an
+                -- active quest, so let it override QuestieDB; fall back to QuestieDB
+                -- only when the live link was unavailable.
                 local merged = {}
                 for itemID, count in pairs(dbCounts) do merged[itemID] = count end
                 for itemID, count in pairs(liveCounts) do
-                    local existing = merged[itemID]
-                    if not existing or count > existing then
-                        merged[itemID] = count
-                    end
+                    merged[itemID] = count
                 end
 
                 for itemID, count in pairs(merged) do
