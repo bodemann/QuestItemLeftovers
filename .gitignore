@@ -1,0 +1,11 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Archives / packaging
+*.zip
+*.rar
+
+# Editor
+*.swp
+*~

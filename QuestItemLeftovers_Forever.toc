@@ -1,8 +1,0 @@
-## Interface: 16001
-## Title: QuestItemLeftovers
-## Notes: Uses QuestieDB to show whether quest-related bag items should be kept or may be discarded.
-## Author: OpenAI + jb
-## Version: 0.1.6
-## Dependencies: QuestieDB
-
-QuestItemLeftovers.lua

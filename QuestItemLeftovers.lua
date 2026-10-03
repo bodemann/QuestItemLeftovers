@@ -1,3 +1,10 @@
+local _, ns = ...
+local L = ns.L
+
+local function colorize(text, hex)
+    return "|cff" .. hex .. text .. "|r"
+end
+
 local QIG = CreateFrame("Frame")
 local DB
 local requirements = {}
@@ -118,13 +125,13 @@ local function questName(questID, fallback)
     end
     questID = validID(questID)
     if not questID then
-        return "Unknown quest"
+        return L.UNKNOWN_QUEST
     end
     if DB and DB.Quest and DB.Quest.name then
         local name = DB.Quest.name(questID)
         if name and name ~= "" then return name end
     end
-    return "Quest " .. questID
+    return (L.QUEST_N):format(questID)
 end
 
 
@@ -502,9 +509,9 @@ local function addQuestLines(tooltip, quests, objectiveOnly)
                 seenNames[key] = true
                 local suffix = ""
                 if objectiveKind(q.kind) and q.count then
-                    suffix = " (needs " .. q.count .. ")"
+                    suffix = " " .. (L.NEEDS):format(q.count)
                 end
-                tooltip:AddLine("  Quest: |cffffd100" .. name .. "|r" .. suffix, 0.75, 0.75, 0.75)
+                tooltip:AddLine("  " .. L.QUEST_LABEL .. " " .. colorize(name, "ffd100") .. suffix, 0.75, 0.75, 0.75)
                 shown = shown + 1
                 if shown >= 5 then break end
             end
@@ -520,48 +527,48 @@ local function addTooltipStatus(tooltip, itemID)
     tooltip:AddLine(" ")
 
     if status.code == "KEEP" then
-        tooltip:AddLine("QuestItemLeftovers: KEEP", 0.25, 1.0, 0.25)
-        tooltip:AddLine(("Across bags: %d / %d required"):format(status.count, status.required), 1, 1, 1)
+        tooltip:AddLine("QuestItemLeftovers: " .. L.STATUS_KEEP, 0.25, 1.0, 0.25)
+        tooltip:AddLine((L.ACROSS_BAGS_REQUIRED):format(status.count, status.required), 1, 1, 1)
         if status.missing and status.missing > 0 then
-            tooltip:AddLine(("Still need %d more."):format(status.missing), 1.0, 0.82, 0.2)
+            tooltip:AddLine((L.STILL_NEED):format(status.missing), 1.0, 0.82, 0.2)
         else
-            tooltip:AddLine("Exact amount needed; do not discard any.", 1.0, 0.82, 0.2)
+            tooltip:AddLine(L.EXACT_AMOUNT, 1.0, 0.82, 0.2)
         end
         addQuestLines(tooltip, status.quests, true)
 
     elseif status.code == "EXCESS" then
-        tooltip:AddLine("QuestItemLeftovers: EXCESS AVAILABLE", 0.25, 1.0, 0.25)
-        tooltip:AddLine(("Across bags: %d owned, %d required"):format(status.count, status.required), 1, 1, 1)
-        tooltip:AddLine(("Up to %d can be discarded."):format(status.excess), 0.25, 1.0, 0.25)
+        tooltip:AddLine("QuestItemLeftovers: " .. L.STATUS_EXCESS, 0.25, 1.0, 0.25)
+        tooltip:AddLine((L.ACROSS_BAGS_OWNED):format(status.count, status.required), 1, 1, 1)
+        tooltip:AddLine((L.UP_TO_DISCARD):format(status.excess), 0.25, 1.0, 0.25)
         addQuestLines(tooltip, status.quests, true)
 
     elseif status.code == "ACTIVE_SUPPORT" then
-        tooltip:AddLine("QuestItemLeftovers: KEEP FOR NOW", 1.0, 0.25, 0.25)
-        tooltip:AddLine("QuestieDB marks this as a source item for an |cffff3333active|r quest.", 0.8, 0.8, 0.8, true)
+        tooltip:AddLine("QuestItemLeftovers: " .. L.STATUS_KEEP_FOR_NOW, 1.0, 0.25, 0.25)
+        tooltip:AddLine((L.SOURCE_ITEM_ACTIVE):format(colorize(L.ACTIVE, "ff3333")), 0.8, 0.8, 0.8, true)
         addQuestLines(tooltip, status.quests, false)
 
     elseif status.code == "STARTS_QUEST" then
-        tooltip:AddLine("QuestItemLeftovers: KEEP", 0.25, 1.0, 0.25)
-        tooltip:AddLine("Starts an unfinished quest:", 1.0, 0.82, 0.2)
-        tooltip:AddLine("  |cffffd100" .. status.questName .. "|r", 0.75, 0.75, 0.75)
+        tooltip:AddLine("QuestItemLeftovers: " .. L.STATUS_KEEP, 0.25, 1.0, 0.25)
+        tooltip:AddLine(L.STARTS_UNFINISHED, 1.0, 0.82, 0.2)
+        tooltip:AddLine("  " .. colorize(status.questName, "ffd100"), 0.75, 0.75, 0.75)
 
     elseif status.code == "POSSIBLE_FUTURE" then
-        tooltip:AddLine("QuestItemLeftovers: POSSIBLE QUEST USE", 1.0, 0.82, 0.2)
-        tooltip:AddLine("Not needed by an active quest, but QuestieDB links it", 0.8, 0.8, 0.8)
-        tooltip:AddLine("to unfinished quest(s). Don't auto-delete it.", 0.8, 0.8, 0.8)
+        tooltip:AddLine("QuestItemLeftovers: " .. L.STATUS_POSSIBLE_FUTURE, 1.0, 0.82, 0.2)
+        tooltip:AddLine(L.POSSIBLE_FUTURE_LINE1, 0.8, 0.8, 0.8)
+        tooltip:AddLine(L.POSSIBLE_FUTURE_LINE2, 0.8, 0.8, 0.8)
         addQuestLines(tooltip, status.quests, false)
 
     elseif status.code == "UNKNOWN_QUEST_ITEM" then
-        tooltip:AddLine("QuestItemLeftovers: QUEST USE UNKNOWN", 1.0, 0.82, 0.2)
-        tooltip:AddLine("WoW marks this as a quest item, but its quest is not", 0.8, 0.8, 0.8)
-        tooltip:AddLine("in the available quest database or your active quest log.", 0.8, 0.8, 0.8)
-        tooltip:AddLine("Keep it unless you know the quest is finished.", 1.0, 0.82, 0.2)
+        tooltip:AddLine("QuestItemLeftovers: " .. L.STATUS_UNKNOWN, 1.0, 0.82, 0.2)
+        tooltip:AddLine(L.UNKNOWN_LINE1, 0.8, 0.8, 0.8)
+        tooltip:AddLine(L.UNKNOWN_LINE2, 0.8, 0.8, 0.8)
+        tooltip:AddLine(L.UNKNOWN_LINE3, 1.0, 0.82, 0.2)
 
     elseif status.code == "LIKELY_SAFE" then
-        tooltip:AddLine("QuestItemLeftovers: LIKELY SAFE TO DELETE", 0.25, 1.0, 0.25)
-        tooltip:AddLine("No unfinished quest needs this item.", 0.8, 0.8, 0.8)
+        tooltip:AddLine("QuestItemLeftovers: " .. L.STATUS_LIKELY_SAFE, 0.25, 1.0, 0.25)
+        tooltip:AddLine(L.LIKELY_SAFE_LINE, 0.8, 0.8, 0.8)
         if status.related and #status.related > 0 then
-            tooltip:AddLine("Related |cff00ff00completed|r quest(s):", 0.8, 0.8, 0.8)
+            tooltip:AddLine((L.RELATED_COMPLETED):format(colorize(L.COMPLETED, "00ff00")), 0.8, 0.8, 0.8)
             addQuestLines(tooltip, status.related, false)
         end
     end
@@ -592,7 +599,7 @@ end
 local function initialize()
     DB = _G.LibQuestieDB
     if not DB then
-        msg("QuestieDB is not loaded. Enable QuestieDB and reload the UI.")
+        msg(L.QUESTIE_NOT_LOADED)
         return false
     end
 
@@ -600,7 +607,7 @@ local function initialize()
         -- Contract 1 is the public named-getter API used by this addon.
         local ok, err = DB.RequireContract(1)
         if not ok then
-            msg(err or "QuestieDB API is incompatible.")
+            msg(err or L.API_INCOMPATIBLE)
             return false
         end
     end
@@ -608,13 +615,13 @@ local function initialize()
     buildItemQuestIndex()
     rebuildQuestCache()
     hookTooltips()
-    msg("loaded. Hover quest-related items, or use /qil scan.")
+    msg(L.LOADED)
     return true
 end
 
 local function scanBags()
     if not DB or not DB.Item then
-        msg("QuestieDB is not loaded. Enable QuestieDB and reload the UI.")
+        msg(L.QUESTIE_NOT_LOADED)
         return
     end
 
@@ -634,19 +641,19 @@ local function scanBags()
                     found = found + 1
                     local name = (DB.Item.name and DB.Item.name(itemID)) or (C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(itemID)) or ("item:" .. itemID)
                     if status.code == "KEEP" then
-                        msg(("KEEP %s — %d/%d, need %d more — %s"):format(name, status.count, status.required, status.missing or 0, status.quests[1] and status.quests[1].name or "active quest"))
+                        msg((L.SCAN_KEEP):format(name, status.count, status.required, status.missing or 0, status.quests[1] and status.quests[1].name or L.ACTIVE_QUEST))
                     elseif status.code == "EXCESS" then
-                        msg(("EXCESS %s — %d owned, %d required; %d discardable — %s"):format(name, status.count, status.required, status.excess, status.quests[1] and status.quests[1].name or "active quest"))
+                        msg((L.SCAN_EXCESS):format(name, status.count, status.required, status.excess, status.quests[1] and status.quests[1].name or L.ACTIVE_QUEST))
                     elseif status.code == "STARTS_QUEST" then
-                        msg(("KEEP %s — starts %s"):format(name, status.questName))
+                        msg((L.SCAN_STARTS):format(name, status.questName))
                     elseif status.code == "POSSIBLE_FUTURE" then
-                        msg(("CHECK %s — linked to unfinished quest: %s"):format(name, status.quests[1] and status.quests[1].name or "unknown quest"))
+                        msg((L.SCAN_CHECK):format(name, status.quests[1] and status.quests[1].name or L.UNKNOWN_QUEST))
                     elseif status.code == "ACTIVE_SUPPORT" then
-                        msg(("KEEP %s — active quest source item — %s"):format(name, status.quests[1] and status.quests[1].name or "active quest"))
+                        msg((L.SCAN_ACTIVE_SUPPORT):format(name, status.quests[1] and status.quests[1].name or L.ACTIVE_QUEST))
                     elseif status.code == "LIKELY_SAFE" then
-                        msg(("LIKELY SAFE TO DELETE %s — no unfinished quest needs this item"):format(name))
+                        msg((L.SCAN_LIKELY_SAFE):format(name))
                     elseif status.code == "UNKNOWN_QUEST_ITEM" then
-                        msg(("UNKNOWN %s — WoW marks it as a quest item, but no quest mapping is available"):format(name))
+                        msg((L.SCAN_UNKNOWN):format(name))
                     end
                 end
             end
@@ -654,7 +661,7 @@ local function scanBags()
     end
 
     if found == 0 then
-        msg("No quest-related bag items found by QuestieDB.")
+        msg(L.SCAN_NONE)
     end
 end
 
@@ -668,9 +675,9 @@ SlashCmdList.QUESTITEMLEFTOVERS = function(input)
     elseif input == "refresh" then
         buildItemQuestIndex()
         rebuildQuestCache()
-        msg("quest database index and active quest cache refreshed.")
+        msg(L.REFRESHED)
     else
-        msg("commands: /qil scan, /qil refresh")
+        msg(L.COMMANDS)
     end
 end
 
