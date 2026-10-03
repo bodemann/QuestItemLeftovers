@@ -504,7 +504,7 @@ local function addQuestLines(tooltip, quests, objectiveOnly)
                 if objectiveKind(q.kind) and q.count then
                     suffix = " (needs " .. q.count .. ")"
                 end
-                tooltip:AddLine("  Quest: " .. name .. suffix, 0.75, 0.75, 0.75)
+                tooltip:AddLine("  Quest: |cffffd100" .. name .. "|r" .. suffix, 0.75, 0.75, 0.75)
                 shown = shown + 1
                 if shown >= 5 then break end
             end
@@ -536,14 +536,14 @@ local function addTooltipStatus(tooltip, itemID)
         addQuestLines(tooltip, status.quests, true)
 
     elseif status.code == "ACTIVE_SUPPORT" then
-        tooltip:AddLine("QuestItemLeftovers: KEEP FOR NOW", 1.0, 0.82, 0.2)
-        tooltip:AddLine("QuestieDB marks this as a source item for an active quest.", 0.8, 0.8, 0.8, true)
+        tooltip:AddLine("QuestItemLeftovers: KEEP FOR NOW", 1.0, 0.25, 0.25)
+        tooltip:AddLine("QuestieDB marks this as a source item for an |cffff3333active|r quest.", 0.8, 0.8, 0.8, true)
         addQuestLines(tooltip, status.quests, false)
 
     elseif status.code == "STARTS_QUEST" then
         tooltip:AddLine("QuestItemLeftovers: KEEP", 0.25, 1.0, 0.25)
         tooltip:AddLine("Starts an unfinished quest:", 1.0, 0.82, 0.2)
-        tooltip:AddLine("  " .. status.questName, 0.75, 0.75, 0.75)
+        tooltip:AddLine("  |cffffd100" .. status.questName .. "|r", 0.75, 0.75, 0.75)
 
     elseif status.code == "POSSIBLE_FUTURE" then
         tooltip:AddLine("QuestItemLeftovers: POSSIBLE QUEST USE", 1.0, 0.82, 0.2)
@@ -558,7 +558,7 @@ local function addTooltipStatus(tooltip, itemID)
         tooltip:AddLine("Keep it unless you know the quest is finished.", 1.0, 0.82, 0.2)
 
     elseif status.code == "LIKELY_SAFE" then
-        tooltip:AddLine("QuestItemLeftovers: LIKELY SAFE TO DELETE", 0.4, 0.85, 1.0)
+        tooltip:AddLine("QuestItemLeftovers: LIKELY SAFE TO DELETE", 0.25, 1.0, 0.25)
         tooltip:AddLine("No unfinished quest needs this item.", 0.8, 0.8, 0.8)
         if status.related and #status.related > 0 then
             tooltip:AddLine("Related |cff00ff00completed|r quest(s):", 0.8, 0.8, 0.8)
