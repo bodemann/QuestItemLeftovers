@@ -78,9 +78,15 @@ local function normalizeMatchText(text)
     return text
 end
 
-local function normalizedCount(count)
-    if type(count) ~= "number" or count < 1 then return 1 end
-    return count
+local function objectiveCount(objective)
+    if type(objective.numRequired) == "number" and objective.numRequired > 0 then
+        return objective.numRequired
+    end
+    if type(objective.text) == "string" then
+        local count = tonumber(objective.text:match("%d+%s*/%s*(%d+)"))
+        if count and count > 0 then return count end
+    end
+    return nil
 end
 
 local function objectiveNameCandidate(text)
@@ -96,6 +102,7 @@ local function objectiveNameCandidate(text)
     -- Strip a trailing progress suffix such as "3/10", "0/10", or "10/10",
     -- optionally preceded by a colon or whitespace.
     s = string.gsub(s, "%s*%d+%s*/%s*%d+%s*$", "")
+    s = string.gsub(s, "^%s*%d+%s*/%s*%d+%s*", "")
     s = string.gsub(s, "%s*[:：]%s*$", "")
 
     -- Strip common collection verbs from the beginning.
@@ -179,7 +186,7 @@ local function buildItemQuestIndex()
             local objectives = DB.Quest.objectives and DB.Quest.objectives(questID)
             local itemObjectives = objectives and objectives[3]
             for _, objective in ipairs(itemObjectives or {}) do
-                addIndexedQuestUse(objective[1], questID, "objective", objective[3])
+                addIndexedQuestUse(objective[1], questID, "objective")
             end
 
             local requiredSourceItems = DB.Quest.requiredSourceItems and DB.Quest.requiredSourceItems(questID)
@@ -275,13 +282,17 @@ local function addRequirement(itemID, count, questID, title, kind)
     end
 
     if objectiveKind(kind) then
-        entry.required = entry.required + normalizedCount(count)
+        if count then
+            entry.required = entry.required + count
+        else
+            entry.unknownCount = true
+        end
     end
 
     entry.quests[#entry.quests + 1] = {
         id = questID,
         name = title,
-        count = normalizedCount(count),
+        count = count,
         kind = kind,
     }
 end
@@ -308,8 +319,8 @@ local function rebuildQuestCache()
                 activeQuests[questID] = true
                 local title = questName(questID, info.title)
 
-                -- Aggregate QuestieDB item objectives per item so that two separate
-                -- objectives for the same item in one quest are summed correctly.
+                -- QuestieDB identifies item objectives, but its third field is
+                -- an icon, not a quantity. Only live objectives supply counts.
                 local dbCounts = {}
                 local objectives = DB.Quest.objectives and DB.Quest.objectives(questID)
                 local itemObjectives = objectives and objectives[3]
@@ -317,7 +328,7 @@ local function rebuildQuestCache()
                     for _, objective in ipairs(itemObjectives) do
                         local oItemID = validID(objective[1])
                         if oItemID then
-                            dbCounts[oItemID] = (dbCounts[oItemID] or 0) + normalizedCount(objective[3])
+                            dbCounts[oItemID] = false
                         end
                     end
                 end
@@ -326,17 +337,21 @@ local function rebuildQuestCache()
                 -- currently in the player's log, ask Blizzard for each required item link.
                 -- The required-item index counts only item objectives, not all objectives.
                 local liveCounts = {}
-                if C_QuestLog.GetQuestObjectives and GetQuestLogItemLink then
+                if C_QuestLog.GetQuestObjectives then
                     local liveObjectives = safeCall(C_QuestLog.GetQuestObjectives, questID)
                     local requiredIndex = 0
                     for _, objective in ipairs(liveObjectives or {}) do
                         if objective.type == "item" then
                             requiredIndex = requiredIndex + 1
-                            local numRequired = normalizedCount(objective.numRequired)
+                            local numRequired = objectiveCount(objective)
                             local link = safeCall(GetQuestLogItemLink, "required", requiredIndex, questID)
                             local liveItemID = parseItemIDFromLink(link)
                             if liveItemID then
-                                liveCounts[liveItemID] = (liveCounts[liveItemID] or 0) + numRequired
+                                if liveCounts[liveItemID] == false or not numRequired then
+                                    liveCounts[liveItemID] = false
+                                else
+                                    liveCounts[liveItemID] = (liveCounts[liveItemID] or 0) + numRequired
+                                end
                             else
                                 -- Forever can expose the live objective while
                                 -- GetQuestLogItemLink still returns nil (for example
@@ -349,7 +364,11 @@ local function rebuildQuestCache()
                                     for bagItemID in pairs(bagQuestItems) do
                                         local bagName = bagQuestItemNames[bagItemID]
                                         if normalizeMatchText(bagName) == candidate then
-                                            liveCounts[bagItemID] = (liveCounts[bagItemID] or 0) + numRequired
+                                            if liveCounts[bagItemID] == false or not numRequired then
+                                                liveCounts[bagItemID] = false
+                                            else
+                                                liveCounts[bagItemID] = (liveCounts[bagItemID] or 0) + numRequired
+                                            end
                                         end
                                     end
                                 end
@@ -358,9 +377,8 @@ local function rebuildQuestCache()
                     end
                 end
 
-                -- Merge the two sources. Blizzard's live data is authoritative for an
-                -- active quest, so let it override QuestieDB; fall back to QuestieDB
-                -- only when the live link was unavailable.
+                -- False means the item is known but its quantity is unknown.
+                -- Live objective data replaces the database's unknown quantity.
                 local merged = {}
                 for itemID, count in pairs(dbCounts) do merged[itemID] = count end
                 for itemID, count in pairs(liveCounts) do
@@ -420,6 +438,12 @@ local function itemQuestContext(itemID)
     local requirement = requirements[itemID]
     if requirement then
         local count = getItemCount(itemID)
+        if requirement.unknownCount then
+            return {
+                code = "UNKNOWN_REQUIREMENT",
+                quests = requirement.quests,
+            }
+        end
         if requirement.required > 0 then
             local excess = count - requirement.required
             if excess > 0 then
@@ -542,6 +566,11 @@ local function addTooltipStatus(tooltip, itemID)
         tooltip:AddLine((L.UP_TO_DISCARD):format(status.excess), 0.25, 1.0, 0.25)
         addQuestLines(tooltip, status.quests, true)
 
+    elseif status.code == "UNKNOWN_REQUIREMENT" then
+        tooltip:AddLine("QuestItemLeftovers: " .. L.STATUS_KEEP_FOR_NOW, 1.0, 0.25, 0.25)
+        tooltip:AddLine(L.UNKNOWN_REQUIREMENT, 1.0, 0.82, 0.2, true)
+        addQuestLines(tooltip, status.quests, true)
+
     elseif status.code == "ACTIVE_SUPPORT" then
         tooltip:AddLine("QuestItemLeftovers: " .. L.STATUS_KEEP_FOR_NOW, 1.0, 0.25, 0.25)
         tooltip:AddLine((L.SOURCE_ITEM_ACTIVE):format(colorize(L.ACTIVE, "ff3333")), 0.8, 0.8, 0.8, true)
@@ -648,6 +677,8 @@ local function scanBags()
                         msg((L.SCAN_STARTS):format(name, status.questName))
                     elseif status.code == "POSSIBLE_FUTURE" then
                         msg((L.SCAN_CHECK):format(name, status.quests[1] and status.quests[1].name or L.UNKNOWN_QUEST))
+                    elseif status.code == "UNKNOWN_REQUIREMENT" then
+                        msg((L.SCAN_UNKNOWN_REQUIREMENT):format(name))
                     elseif status.code == "ACTIVE_SUPPORT" then
                         msg((L.SCAN_ACTIVE_SUPPORT):format(name, status.quests[1] and status.quests[1].name or L.ACTIVE_QUEST))
                     elseif status.code == "LIKELY_SAFE" then
