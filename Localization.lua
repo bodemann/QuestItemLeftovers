@@ -15,6 +15,8 @@ local L = {
     UP_TO_DISCARD = "Up to %d can be discarded.",
 
     SOURCE_ITEM_ACTIVE = "QuestieDB marks this as a source item for an %s quest.",
+    UNKNOWN_REQUIREMENT = "An active quest needs this item, but its required quantity is unknown. Do not discard it.",
+    SCAN_UNKNOWN_REQUIREMENT = "KEEP %s — active quest quantity unknown",
     ACTIVE = "active",
 
     STARTS_UNFINISHED = "Starts an unfinished quest:",
